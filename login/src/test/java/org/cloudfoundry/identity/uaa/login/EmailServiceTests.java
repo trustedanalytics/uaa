@@ -23,7 +23,7 @@ public class EmailServiceTests {
 
     @Test
     public void testSendOssMimeMessage() throws Exception {
-        EmailService emailService = new EmailService(mailSender, "http://login.example.com/login", "oss");
+        EmailService emailService = new EmailService(mailSender, "admin@login.example.com", "Cloud Foundry");
 
         emailService.sendMessage(null, "user@example.com", MessageType.CHANGE_EMAIL, "Test Message", "<html><body>hi</body></html>");
 
@@ -36,18 +36,5 @@ public class EmailServiceTests {
         assertThat(mimeMessageWrapper.getRecipients(Message.RecipientType.TO), hasSize(1));
         assertThat(mimeMessageWrapper.getRecipients(Message.RecipientType.TO).get(0), equalTo((Address) new InternetAddress("user@example.com")));
         assertThat(mimeMessageWrapper.getContentString(), equalTo("<html><body>hi</body></html>"));
-    }
-
-    @Test
-    public void testSendPivotalMimeMessage() throws Exception {
-        EmailService emailService = new EmailService(mailSender, "http://login.example.com/login", "pivotal");
-
-        emailService.sendMessage(null, "user@example.com", MessageType.CHANGE_EMAIL, "Test Message", "<html><body>hi</body></html>");
-
-        FakeJavaMailSender.MimeMessageWrapper mimeMessageWrapper = mailSender.getSentMessages().get(0);
-        assertThat(mimeMessageWrapper.getFrom(), hasSize(1));
-        InternetAddress fromAddress = (InternetAddress) mimeMessageWrapper.getFrom().get(0);
-        assertThat(fromAddress.getAddress(), equalTo("admin@login.example.com"));
-        assertThat(fromAddress.getPersonal(), equalTo("Pivotal"));
     }
 }

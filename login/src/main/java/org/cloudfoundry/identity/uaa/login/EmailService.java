@@ -2,30 +2,27 @@ package org.cloudfoundry.identity.uaa.login;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.cloudfoundry.identity.uaa.zone.IdentityZone;
-import org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.UnsupportedEncodingException;
 import javax.mail.Address;
 import javax.mail.Message;
 import javax.mail.MessagingException;
 import javax.mail.internet.AddressException;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
-import java.io.UnsupportedEncodingException;
 
 public class EmailService implements MessageService {
     private final Log logger = LogFactory.getLog(getClass());
 
     private JavaMailSender mailSender;
-    private final String loginUrl;
-    private final String brand;
+    private final String senderEmail;
+    private final String senderName;
 
-    public EmailService(JavaMailSender mailSender, String loginUrl, String brand) {
+    public EmailService(JavaMailSender mailSender, String senderEmail, String senderName) {
         this.mailSender = mailSender;
-        this.loginUrl = loginUrl;
-        this.brand = brand;
+        this.senderEmail = senderEmail;
+        this.senderName = senderName;
     }
 
     public JavaMailSender getMailSender() {
@@ -37,14 +34,7 @@ public class EmailService implements MessageService {
     }
 
     private Address[] getSenderAddresses() throws AddressException, UnsupportedEncodingException {
-        String host = UriComponentsBuilder.fromHttpUrl(loginUrl).build().getHost();
-        String name = null;
-        if (IdentityZoneHolder.get().equals(IdentityZone.getUaa())) {
-            name = brand.equals("pivotal") ? "Pivotal" : "Cloud Foundry";
-        } else {
-            name = IdentityZoneHolder.get().getName();
-        }
-        return new Address[]{new InternetAddress("admin@" + host, name)};
+        return new Address[]{new InternetAddress(senderEmail, senderName)};
     }
 
     @Override

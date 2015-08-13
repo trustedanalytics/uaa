@@ -1,2 +1,2 @@
-pid: /var/vcap/sys/run/uaa.pid
+pid: /var/vcap/sys/run/uaa-intel.pid
 mbus: nats://localhost:4222

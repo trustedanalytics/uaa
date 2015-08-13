@@ -12,10 +12,6 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.login;
 
-import java.security.Principal;
-
-import javax.servlet.http.HttpServletRequest;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,8 +20,15 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.security.Principal;
+import java.util.List;
+import java.util.Map;
+import javax.servlet.http.HttpServletRequest;
+
 @Controller
 public class HomeController extends AbstractControllerInfo {
+    private static final String LINK_FIELD = "login-link";
+
     private final Log logger = LogFactory.getLog(getClass());
     protected final Environment environment;
     @Autowired
@@ -37,8 +40,16 @@ public class HomeController extends AbstractControllerInfo {
 
     @RequestMapping(value = { "/", "/home" })
     public String home(Model model, Principal principal) {
+        List<Map<String, String>> tiles = tileInfo.getLoginTiles();
+        if (tiles != null && tiles.size() == 1) {
+            String url = tiles.get(0).get(LINK_FIELD);
+            if (url != null && url.length() > 0) {
+                return "redirect:" + url;
+            }
+        }
+
         model.addAttribute("principal", principal);
-        model.addAttribute("tiles", tileInfo.getLoginTiles());
+        model.addAttribute("tiles", tiles);
         boolean invitationsEnabled = "true".equalsIgnoreCase(environment.getProperty("login.invitationsEnabled"));
         if (invitationsEnabled) {
             model.addAttribute("invitationsLink", "/invitations/new");

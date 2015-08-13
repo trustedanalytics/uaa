@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" dir="ltr" lang="en" th:with="assetBaseUrl=${@environment.getProperty('assetBaseUrl','/resources/oss')}">
+<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" dir="ltr" lang="en"
+      th:with="assetBaseUrl=${@environment.getProperty('assetBaseUrl','/resources/trustedanalytics')},organization=${@environment.getProperty('organization','Intel Corporation')}">
 <head>
-    <title th:inline="text">[[${@environment.getProperty('login.brand') == 'pivotal' ? 'Pivotal' : 'Cloud Foundry'}]]</title>
-    <link href='/resources/pivotal/images/favicon.ico' th:href="@{${assetBaseUrl}+'/images/favicon.ico'}" rel='shortcut icon' />
+    <title th:inline="text">Trusted Analytics</title>
+    <link href='/resources/trustedanalytics/images/favicon.ico' th:href="@{${assetBaseUrl}+'/images/favicon.ico'}" rel='shortcut icon' />
     <meta charset='utf-8' />
-    <meta name='author' content='Pivotal Software, Inc' />
-    <meta name='copyright' content='Copyright 2014 Pivotal Software, Inc. All Rights Reserved.' />
+    <meta name='author' content='' th:content="${organization}" />
+    <meta name='copyright' content='' th:content="@{'Copyright 2014 ' + ${organization} + '. All Rights Reserved.'}" />
     <meta name='robots' content='all' />
     <meta name='Description' content=""/>
     <meta name='keywords' content=""/>
@@ -18,13 +19,7 @@
     <div class="header" th:style="${T(org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder).uaa} ? |background-image: url(@{${assetBaseUrl}+'/images/logo.png'});|" layout:fragment="page-header"></div>
     <div layout:fragment="page-content"></div>
     <div class="footer-spacer"></div>
-</div>
-<div class="footer">
-    <div class="copyright"
-         th:title="|Version: ${@buildInfo.version}, Commit: ${@buildInfo.commitId}, Timestamp: ${@buildInfo.timestamp}, UAA: ${@buildInfo.uaaUrl}|"
-         th:utext="|&#169; ${#dates.year(#dates.createNow())} Pivotal Software, Inc. All Rights Reserved.|">
-        &#169; 2014 Pivotal Software, Inc. All Rights Reserved.
-    </div>
+    <div class="footer-cookies">Cookies are necessary for proper behaviour of this site. If you don't want to use them, you can disable cookies in browser preferences.</div>
 </div>
 
 <th:block th:with="code=${@environment.getProperty('analytics.code')},domain=${@environment.getProperty('analytics.domain')}">
