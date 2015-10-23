@@ -264,7 +264,7 @@ public class LoginInfoEndpoint {
             }
             return "login";
         }
-        return "home";
+        return "redirect:home";
     }
 
     protected List<IdentityProviderDefinition> getIdentityProviderDefinitions(List<String> allowedIdps) {
