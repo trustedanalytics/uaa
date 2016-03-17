@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -12,14 +12,8 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.integration;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-
-import java.util.Collections;
-import java.util.Map;
-
 import org.cloudfoundry.identity.uaa.ServerRunning;
-import org.cloudfoundry.identity.uaa.message.PasswordChangeRequest;
+import org.cloudfoundry.identity.uaa.account.PasswordChangeRequest;
 import org.cloudfoundry.identity.uaa.oauth.UaaOauth2ErrorHandler;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
 import org.cloudfoundry.identity.uaa.test.TestAccountSetup;
@@ -40,10 +34,16 @@ import org.springframework.security.oauth2.common.util.RandomValueStringGenerato
 import org.springframework.web.client.RestOperations;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Collections;
+import java.util.Map;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+
 /**
  * Integration test to verify that the trusted client use cases are supported
  * adequately for cf.
- * 
+ *
  * @author Luke Taylor
  * @author Dave Syer
  */
@@ -90,7 +90,7 @@ public class CfScimUserEndpointIntegrationTests {
         assertEquals(JOE, joe.getUserName());
 
         PasswordChangeRequest change = new PasswordChangeRequest();
-        change.setPassword("password");
+        change.setPassword("Passwo3d");
 
         HttpHeaders headers = new HttpHeaders();
         ResponseEntity<Void> result = client
@@ -102,7 +102,7 @@ public class CfScimUserEndpointIntegrationTests {
         // The implicit grant for cf requires extra parameters in the
         // authorization request
         context.setParameters(Collections.singletonMap("credentials",
-                        testAccounts.getJsonCredentials(joe.getUserName(), "password")));
+                        testAccounts.getJsonCredentials(joe.getUserName(), "Passwo3d")));
 
     }
 
@@ -125,8 +125,8 @@ public class CfScimUserEndpointIntegrationTests {
     public void changePasswordSucceeds() throws Exception {
 
         PasswordChangeRequest change = new PasswordChangeRequest();
-        change.setOldPassword("password");
-        change.setPassword("newpassword");
+        change.setOldPassword("Passwo3d");
+        change.setPassword("Newpasswo3d");
 
         HttpHeaders headers = new HttpHeaders();
         RestOperations client = serverRunning.getRestTemplate();
@@ -158,7 +158,7 @@ public class CfScimUserEndpointIntegrationTests {
         @SuppressWarnings("unchecked")
         Map<String, String> error = response.getBody();
         // System.err.println(error);
-        assertEquals("access_denied", error.get("error"));
+        assertEquals("insufficient_scope", error.get("error"));
     }
 
     @Test

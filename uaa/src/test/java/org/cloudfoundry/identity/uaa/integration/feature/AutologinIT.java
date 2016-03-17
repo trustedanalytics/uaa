@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -17,8 +17,13 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+
+import org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils;
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
+import org.cloudfoundry.identity.uaa.security.web.CookieBasedCsrfTokenRepository;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -62,8 +67,21 @@ public class AutologinIT {
 
     @Autowired
     TestClient testClient;
-    
+
     private UaaTestAccounts testAccounts = UaaTestAccounts.standard(null);
+
+    @Before
+    @After
+    public void logout_and_clear_cookies() {
+        try {
+            webDriver.get(baseUrl + "/logout.do");
+        }catch (org.openqa.selenium.TimeoutException x) {
+            //try again - this should not be happening - 20 second timeouts
+            webDriver.get(baseUrl + "/logout.do");
+        }
+        webDriver.get(appUrl+"/j_spring_security_logout");
+        webDriver.manage().deleteAllCookies();
+    }
 
     @Test
     public void testAutologinFlow() throws Exception {
@@ -173,15 +191,32 @@ public class AutologinIT {
 
         //here we must reset our state. we do that by following the logout flow.
         headers.clear();
+
+        headers.set(headers.ACCEPT, MediaType.TEXT_HTML_VALUE);
+        ResponseEntity<String> loginResponse = template.exchange(baseUrl + "/login",
+            HttpMethod.GET,
+            new HttpEntity<>(null, headers),
+            String.class);
+
+        if (loginResponse.getHeaders().containsKey("Set-Cookie")) {
+            for (String cookie : loginResponse.getHeaders().get("Set-Cookie")) {
+                headers.add("Cookie", cookie);
+            }
+        }
+        String csrf = IntegrationTestUtils.extractCookieCsrf(loginResponse.getBody());
+        requestBody.add(CookieBasedCsrfTokenRepository.DEFAULT_CSRF_COOKIE_NAME, csrf);
+
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-        ResponseEntity<Void> loginResponse = restOperations.exchange(baseUrl + "/login.do",
+        loginResponse = restOperations.exchange(baseUrl + "/login.do",
             HttpMethod.POST,
             new HttpEntity<>(requestBody, headers),
-            Void.class);
+            String.class);
         cookies = loginResponse.getHeaders().get("Set-Cookie");
-        assertEquals(1, cookies.size());
+        assertEquals(2, cookies.size());
         headers.clear();
-        headers.add("Cookie", cookies.get(0));
+        for (String cookie : loginResponse.getHeaders().get("Set-Cookie")) {
+            headers.add("Cookie", cookie);
+        }
         restOperations.exchange(baseUrl + "/profile",
             HttpMethod.GET,
             new HttpEntity<>(null, headers),Void.class);

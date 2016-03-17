@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -12,23 +12,14 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.integration;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
-
-import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import org.apache.http.client.HttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.cloudfoundry.identity.uaa.ServerRunning;
+import org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
 import org.cloudfoundry.identity.uaa.test.TestAccountSetup;
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
+import org.cloudfoundry.identity.uaa.security.web.CookieBasedCsrfTokenRepository;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Assume;
@@ -57,6 +48,17 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriUtils;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
+
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author Luke Taylor
@@ -213,15 +215,18 @@ public class OpenIdTokenAuthorizationWithApprovalIntegrationTests {
         String clientSecret = resource.getClientSecret();
         String uri = serverRunning.getUrl("/oauth/authorize?response_type={response_type}&"+
             "state={state}&client_id={client_id}&redirect_uri={redirect_uri}");
+        headers.remove("Authorization");
+        RestTemplate restTemplate = serverRunning.createRestTemplate();
 
-        ResponseEntity<Void> result = serverRunning.getForResponse(
-            uri,
-            headers,
+        ResponseEntity<Void> result = restTemplate.exchange(uri,
+            HttpMethod.GET,
+            new HttpEntity<Void>(null, headers),
+            Void.class,
             responseType,
             state,
             clientId,
-            redirectUri
-        );
+            redirectUri);
+
         assertEquals(HttpStatus.FOUND, result.getStatusCode());
         String location = UriUtils.decode(result.getHeaders().getLocation().toString(), "UTF-8");
 
@@ -231,6 +236,11 @@ public class OpenIdTokenAuthorizationWithApprovalIntegrationTests {
         }
 
         ResponseEntity<String> response = serverRunning.getForString(location, headers);
+        if (response.getHeaders().containsKey("Set-Cookie")) {
+            for (String cookie : response.getHeaders().get("Set-Cookie")) {
+                headers.add("Cookie", cookie);
+            }
+        }
         // should be directed to the login screen...
         assertTrue(response.getBody().contains("/login.do"));
         assertTrue(response.getBody().contains("username"));
@@ -238,19 +248,26 @@ public class OpenIdTokenAuthorizationWithApprovalIntegrationTests {
 
         MultiValueMap<String, String> formData = new LinkedMultiValueMap<String, String>();
         formData.add("username", user.getUserName());
-        formData.add("password", "secret");
+        formData.add("password", "s3Cret");
+        formData.add(CookieBasedCsrfTokenRepository.DEFAULT_CSRF_COOKIE_NAME, IntegrationTestUtils.extractCookieCsrf(response.getBody()));
 
         // Should be redirected to the original URL, but now authenticated
         result = serverRunning.postForResponse("/login.do", headers, formData);
         assertEquals(HttpStatus.FOUND, result.getStatusCode());
 
+        headers.remove("Cookie");
         if (result.getHeaders().containsKey("Set-Cookie")) {
-            String cookie = result.getHeaders().getFirst("Set-Cookie");
-            headers.set("Cookie", cookie);
+            for (String cookie : result.getHeaders().get("Set-Cookie")) {
+                headers.add("Cookie", cookie);
+            }
         }
 
         location = UriUtils.decode(result.getHeaders().getLocation().toString(), "UTF-8");
-        response = serverRunning.getForString(location, headers);
+        //response = serverRunning.getForString(location, headers);
+        response = restTemplate.exchange(location,
+            HttpMethod.GET,
+            new HttpEntity<>(null,headers),
+            String.class);
         if (response.getStatusCode() == HttpStatus.OK) {
             // The grant access page should be returned
             assertTrue(response.getBody().contains("Application Authorization</h1>"));
@@ -346,7 +363,7 @@ public class OpenIdTokenAuthorizationWithApprovalIntegrationTests {
         user.addEmail(email);
         user.setVerified(verified);
         user.setActive(true);
-        user.setPassword("secret");
+        user.setPassword("s3Cret");
 
         return client.postForEntity(serverRunning.getUrl(userEndpoint), user, ScimUser.class);
     }

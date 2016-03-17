@@ -123,10 +123,10 @@ in the token when a request to the UAA is made for a password change.
 
 Scopes, are arbitrary strings, defined by the client itself. The UAA does use the base name of a scope and adds it to the 
 [audience](http://tools.ietf.org/html/draft-ietf-oauth-json-web-token-25#section-4.1.3) field. The 'base name' is defined
-as anything before the first dot. 
+as anything before the last dot. 
 
 ### Client authorities, UAA groups and scopes
-In the UAA each client has a list of ```client authorities```. This is ```List&lt;String&gt;``` of scopes
+In the UAA each client has a list of ```client authorities```. This is ```List<String>``` of scopes
 that represents the permissions the client has by itself. The second field the client has is the ```scopes``` field. 
 The ```client scopes``` represents the permissions that the client uses when acting on behalf of a user.
  

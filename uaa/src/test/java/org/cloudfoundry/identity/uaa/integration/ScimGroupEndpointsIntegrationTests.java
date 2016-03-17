@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -12,30 +12,18 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.integration;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
-import java.io.IOException;
-import java.net.URI;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.cloudfoundry.identity.uaa.ServerRunning;
-import org.cloudfoundry.identity.uaa.message.PasswordChangeRequest;
+import org.cloudfoundry.identity.uaa.integration.util.IntegrationTestUtils;
 import org.cloudfoundry.identity.uaa.scim.ScimGroup;
 import org.cloudfoundry.identity.uaa.scim.ScimGroupMember;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
 import org.cloudfoundry.identity.uaa.test.TestAccountSetup;
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
+import org.cloudfoundry.identity.uaa.security.web.CookieBasedCsrfTokenRepository;
+import org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder;
 import org.junit.After;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,6 +45,20 @@ import org.springframework.security.oauth2.provider.client.BaseClientDetails;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 @OAuth2ContextConfiguration(OAuth2ContextConfiguration.ClientCredentials.class)
 public class ScimGroupEndpointsIntegrationTests {
@@ -81,7 +83,8 @@ public class ScimGroupEndpointsIntegrationTests {
 
     private static final List<String> defaultGroups = Arrays.asList("openid", "scim.me", "cloud_controller.read",
                     "cloud_controller.write", "password.write", "scim.userids", "uaa.user", "approvals.me",
-                    "oauth.approvals", "cloud_controller_service_permissions.read");
+                    "oauth.approvals", "cloud_controller_service_permissions.read", "profile", "roles", "user_attributes");
+
 
     @Rule
     public ServerRunning serverRunning = ServerRunning.isRunning();
@@ -98,9 +101,6 @@ public class ScimGroupEndpointsIntegrationTests {
 
     @Before
     public void createRestTemplate() throws Exception {
-
-        Assume.assumeTrue(!testAccounts.isProfileActive("vcap"));
-
         client = (RestTemplate)serverRunning.getRestTemplate();
         client.setErrorHandler(new OAuth2ErrorHandler(context.getResource()) {
             // Pass errors through in response entity for status code analysis
@@ -114,13 +114,9 @@ public class ScimGroupEndpointsIntegrationTests {
             }
         });
 
-        JOEL = new ScimGroupMember(createUser("joel_" + new RandomValueStringGenerator().generate().toLowerCase(),
-                        "pwd").getId());
-        DALE = new ScimGroupMember(createUser("dale_" + new RandomValueStringGenerator().generate().toLowerCase(),
-                        "pwd").getId());
-        VIDYA = new ScimGroupMember(createUser("vidya_" + new RandomValueStringGenerator().generate().toLowerCase(),
-                        "pwd").getId());
-
+        JOEL = new ScimGroupMember(createUser("joel_" + new RandomValueStringGenerator().generate().toLowerCase(), "Passwo3d").getId());
+        DALE = new ScimGroupMember(createUser("dale_" + new RandomValueStringGenerator().generate().toLowerCase(), "Passwo3d").getId());
+        VIDYA = new ScimGroupMember(createUser("vidya_" + new RandomValueStringGenerator().generate().toLowerCase(), "Passwo3d").getId());
     }
 
     @After
@@ -147,20 +143,14 @@ public class ScimGroupEndpointsIntegrationTests {
         user.setName(new ScimUser.Name(username, username));
         user.addEmail(username);
         user.setVerified(true);
-
-        ScimUser u = client.postForEntity(serverRunning.getUrl(userEndpoint), user, ScimUser.class).getBody();
-        PasswordChangeRequest change = new PasswordChangeRequest();
-        change.setPassword(password);
-
-        HttpHeaders headers = new HttpHeaders();
-        ResponseEntity<Void> result = client.exchange(serverRunning.getUrl(userEndpoint) + "/{id}/password",
-                        HttpMethod.PUT, new HttpEntity<PasswordChangeRequest>(change, headers), Void.class, u.getId());
-        assertEquals(HttpStatus.OK, result.getStatusCode());
-        return u;
+        user.setPassword(password);
+        ResponseEntity<ScimUser> result = client.postForEntity(serverRunning.getUrl(userEndpoint), user, ScimUser.class);
+        assertEquals(HttpStatus.CREATED, result.getStatusCode());
+        return result.getBody();
     }
 
     private ScimGroup createGroup(String name, ScimGroupMember... members) {
-        ScimGroup g = new ScimGroup(name);
+        ScimGroup g = new ScimGroup(null,name,IdentityZoneHolder.get().getId());
         List<ScimGroupMember> m = members != null ? Arrays.asList(members) : Collections.<ScimGroupMember> emptyList();
         g.setMembers(m);
         ScimGroup g1 = client.postForEntity(serverRunning.getUrl(groupEndpoint), g, ScimGroup.class).getBody();
@@ -173,15 +163,15 @@ public class ScimGroupEndpointsIntegrationTests {
     private ScimGroup updateGroup(String id, String name, ScimGroupMember... members) {
         HttpHeaders headers = new HttpHeaders();
         headers.add("If-Match", "*");
-        ScimGroup g = new ScimGroup(name);
+        ScimGroup g = new ScimGroup(null,name,IdentityZoneHolder.get().getId());
         List<ScimGroupMember> m = members != null ? Arrays.asList(members) : Collections.<ScimGroupMember> emptyList();
         g.setMembers(m);
         @SuppressWarnings("rawtypes")
         ResponseEntity<Map> r = client.exchange(serverRunning.getUrl(groupEndpoint + "/{id}"), HttpMethod.PUT,
-                        new HttpEntity<ScimGroup>(g, headers), Map.class, id);
+                        new HttpEntity<>(g, headers), Map.class, id);
         logger.warn(r.getBody());
         ScimGroup g1 = client.exchange(serverRunning.getUrl(groupEndpoint + "/{id}"), HttpMethod.PUT,
-                        new HttpEntity<ScimGroup>(g, headers), ScimGroup.class, id).getBody();
+                        new HttpEntity<>(g, headers), ScimGroup.class, id).getBody();
         assertEquals(name, g1.getDisplayName());
         assertEquals(m.size(), g1.getMembers().size());
         return g1;
@@ -189,13 +179,7 @@ public class ScimGroupEndpointsIntegrationTests {
 
     private void validateUserGroups(String id, String... groups) {
         List<String> groupNames = groups != null ? Arrays.asList(groups) : Collections.<String> emptyList();
-        assertEquals(groupNames.size() + defaultGroups.size(), getUser(id).getGroups().size()); // there
-                                                                                                // are
-                                                                                                // 8
-                                                                                                // default
-                                                                                                // user
-                                                                                                // groups
-                                                                                                // configured
+        assertEquals(groupNames.size() + defaultGroups.size(), getUser(id).getGroups().size());
         for (ScimUser.Group g : getUser(id).getGroups()) {
             assertTrue(defaultGroups.contains(g.getDisplay()) || groupNames.contains(g.getDisplay()));
         }
@@ -250,7 +234,7 @@ public class ScimGroupEndpointsIntegrationTests {
 
     @Test
     public void createGroupWithInvalidMembersFailsCorrectly() {
-        ScimGroup g = new ScimGroup(CFID);
+        ScimGroup g = new ScimGroup(null, CFID, IdentityZoneHolder.get().getId());
         ScimGroupMember m2 = new ScimGroupMember("wrongid");
         g.setMembers(Arrays.asList(VIDYA, m2));
 
@@ -342,7 +326,7 @@ public class ScimGroupEndpointsIntegrationTests {
 
     @Test
     public void testDeleteMemberUserUpdatesGroups() {
-        ScimGroupMember toDelete = new ScimGroupMember(createUser(DELETE_ME, "pwd").getId());
+        ScimGroupMember toDelete = new ScimGroupMember(createUser(DELETE_ME, "Passwo3d").getId());
         ScimGroup g1 = createGroup(CFID, JOEL, DALE, toDelete);
         ScimGroup g2 = createGroup(CF_MGR, DALE, toDelete);
         deleteResource(userEndpoint, toDelete.getMemberId());
@@ -384,9 +368,9 @@ public class ScimGroupEndpointsIntegrationTests {
     public void testAccessTokenReflectsGroupMembership() throws Exception {
 
         createTestClient(DELETE_ME, "secret", CFID);
-        ScimUser user = createUser(DELETE_ME, "pwd1");
+        ScimUser user = createUser(DELETE_ME, "Passwo3d");
         createGroup(CFID, new ScimGroupMember(user.getId()));
-        OAuth2AccessToken token = getAccessToken(DELETE_ME, "secret", DELETE_ME, "pwd1");
+        OAuth2AccessToken token = getAccessToken(DELETE_ME, "secret", DELETE_ME, "Passwo3d");
         assertTrue("Wrong token: " + token, token.getScope().contains(CFID));
 
         deleteTestClient(DELETE_ME);
@@ -398,9 +382,9 @@ public class ScimGroupEndpointsIntegrationTests {
     public void testAccessTokenReflectsGroupMembershipForPasswordGrant() throws Exception {
 
         createTestClient(DELETE_ME, "secret", CFID);
-        ScimUser user = createUser(DELETE_ME, "pwd1");
+        ScimUser user = createUser(DELETE_ME, "Passwo3d");
         createGroup(CFID, new ScimGroupMember(user.getId()));
-        OAuth2AccessToken token = getAccessTokenWithPassword(DELETE_ME, "secret", DELETE_ME, "pwd1");
+        OAuth2AccessToken token = getAccessTokenWithPassword(DELETE_ME, "secret", DELETE_ME, "Passwo3d");
         assertTrue("Wrong token: " + token, token.getScope().contains(CFID));
 
         deleteTestClient(DELETE_ME);
@@ -409,7 +393,7 @@ public class ScimGroupEndpointsIntegrationTests {
     }
 
     private void createTestClient(String name, String secret, String scope) throws Exception {
-        OAuth2AccessToken token = getClientCredentialsAccessToken("clients.read,clients.write");
+        OAuth2AccessToken token = getClientCredentialsAccessToken("clients.read,clients.write,clients.admin");
         HttpHeaders headers = getAuthenticatedHeaders(token);
         BaseClientDetails client = new BaseClientDetails(name, "", scope, "authorization_code,password",
                         "scim.read,scim.write");
@@ -478,14 +462,16 @@ public class ScimGroupEndpointsIntegrationTests {
         return accessToken;
     }
 
-    private OAuth2AccessToken getAccessToken(String clientId, String clientSecret, String username, String password) {
+    private OAuth2AccessToken getAccessToken(String clientId, String clientSecret, String username, String password) throws URISyntaxException {
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(Arrays.asList(MediaType.TEXT_HTML, MediaType.ALL));
 
         URI uri = serverRunning.buildUri("/oauth/authorize").queryParam("response_type", "code")
                         .queryParam("state", "mystateid").queryParam("client_id", clientId)
                         .queryParam("redirect_uri", "http://anywhere.com").build();
-        ResponseEntity<Void> result = serverRunning.getForResponse(uri.toString(), headers);
+        ResponseEntity<Void> result = serverRunning.createRestTemplate().exchange(
+            uri.toString(), HttpMethod.GET, new HttpEntity<>(null, headers),
+            Void.class);
         assertEquals(HttpStatus.FOUND, result.getStatusCode());
         String location = result.getHeaders().getLocation().toString();
 
@@ -500,20 +486,32 @@ public class ScimGroupEndpointsIntegrationTests {
         assertTrue(response.getBody().contains("username"));
         assertTrue(response.getBody().contains("password"));
 
-        MultiValueMap<String, String> formData = new LinkedMultiValueMap<String, String>();
+        if (response.getHeaders().containsKey("Set-Cookie")) {
+            String cookie = response.getHeaders().getFirst("Set-Cookie");
+            headers.add("Cookie", cookie);
+        }
+
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
         formData.add("username", username);
         formData.add("password", password);
+        formData.add(CookieBasedCsrfTokenRepository.DEFAULT_CSRF_COOKIE_NAME, IntegrationTestUtils.extractCookieCsrf(response.getBody()));
 
         // Should be redirected to the original URL, but now authenticated
         result = serverRunning.postForResponse("/login.do", headers, formData);
         assertEquals(HttpStatus.FOUND, result.getStatusCode());
 
+        headers.remove("Cookie");
         if (result.getHeaders().containsKey("Set-Cookie")) {
-            String cookie = result.getHeaders().getFirst("Set-Cookie");
-            headers.set("Cookie", cookie);
+            for (String cookie : result.getHeaders().get("Set-Cookie")) {
+                headers.add("Cookie", cookie);
+            }
         }
 
-        response = serverRunning.getForString(result.getHeaders().getLocation().toString(), headers);
+        response = serverRunning.createRestTemplate().exchange(
+            new URI(result.getHeaders().getLocation().toString()),
+            HttpMethod.GET,
+            new HttpEntity<>(null,headers),
+            String.class);
         if (response.getStatusCode() == HttpStatus.OK) {
             // The grant access page should be returned
             assertTrue(response.getBody().contains("<h1>Application Authorization</h1>"));

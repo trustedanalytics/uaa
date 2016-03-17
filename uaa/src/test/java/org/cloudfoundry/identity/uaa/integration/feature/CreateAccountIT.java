@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -12,15 +12,9 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.integration.feature;
 
-import java.security.SecureRandom;
-import java.util.Iterator;
-
-import static org.apache.commons.lang3.StringUtils.isEmpty;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertFalse;
 import com.dumbster.smtp.SimpleSmtpServer;
 import com.dumbster.smtp.SmtpMessage;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -31,16 +25,26 @@ import org.openqa.selenium.WebDriver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.client.test.TestAccounts;
+import org.springframework.security.oauth2.common.util.RandomValueStringGenerator;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+
+import java.security.SecureRandom;
+import java.util.Iterator;
+
+import static org.apache.commons.lang3.StringUtils.isEmpty;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertFalse;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(classes = DefaultIntegrationTestConfig.class)
 public class CreateAccountIT {
 
+    public static final String SECRET = "s3Cret";
     @Autowired
     TestAccounts testAccounts;
-    
+
     @Autowired @Rule
     public IntegrationTestRule integrationTestRule;
 
@@ -60,26 +64,22 @@ public class CreateAccountIT {
     String appUrl;
 
     @Before
-    public void setUp() {
-        webDriver.get(baseUrl + "/logout.do");
+    @After
+    public void logout_and_clear_cookies() {
+        try {
+            webDriver.get(baseUrl + "/logout.do");
+        }catch (org.openqa.selenium.TimeoutException x) {
+            //try again - this should not be happening - 20 second timeouts
+            webDriver.get(baseUrl + "/logout.do");
+        }
+        webDriver.get(appUrl+"/j_spring_security_logout");
+        webDriver.manage().deleteAllCookies();
     }
 
     @Test
     public void testUserInitiatedSignup() throws Exception {
-        String userEmail = "user" + new SecureRandom().nextInt() + "@example.com";
-
-        webDriver.get(baseUrl + "/");
-        webDriver.findElement(By.xpath("//*[text()='Create account']")).click();
-
-        Assert.assertEquals("Create your account", webDriver.findElement(By.tagName("h1")).getText());
-
         int receivedEmailSize = simpleSmtpServer.getReceivedEmailSize();
-
-        webDriver.findElement(By.name("email")).sendKeys(userEmail);
-        webDriver.findElement(By.name("password")).sendKeys("secret");
-        webDriver.findElement(By.name("password_confirmation")).sendKeys("secret");
-
-        webDriver.findElement(By.xpath("//input[@value='Send activation link']")).click();
+        String userEmail = startCreateUserFlow(SECRET);
 
         Assert.assertEquals(receivedEmailSize + 1, simpleSmtpServer.getReceivedEmailSize());
         Iterator receivedEmail = simpleSmtpServer.getReceivedEmail();
@@ -101,7 +101,7 @@ public class CreateAccountIT {
         webDriver.findElement(By.linkText("Sign Out")).click();
 
         webDriver.findElement(By.name("username")).sendKeys(userEmail);
-        webDriver.findElement(By.name("password")).sendKeys("secret");
+        webDriver.findElement(By.name("password")).sendKeys(SECRET);
         webDriver.findElement(By.xpath("//input[@value='Sign in']")).click();
 
         Assert.assertThat(webDriver.findElement(By.cssSelector("h1")).getText(), containsString("Where to?"));
@@ -118,8 +118,8 @@ public class CreateAccountIT {
         int receivedEmailSize = simpleSmtpServer.getReceivedEmailSize();
 
         webDriver.findElement(By.name("email")).sendKeys(userEmail);
-        webDriver.findElement(By.name("password")).sendKeys("secret");
-        webDriver.findElement(By.name("password_confirmation")).sendKeys("secret");
+        webDriver.findElement(By.name("password")).sendKeys(SECRET);
+        webDriver.findElement(By.name("password_confirmation")).sendKeys(SECRET);
         webDriver.findElement(By.xpath("//input[@value='Send activation link']")).click();
 
         Assert.assertEquals(receivedEmailSize + 1, simpleSmtpServer.getReceivedEmailSize());
@@ -136,5 +136,28 @@ public class CreateAccountIT {
 
         webDriver.get(link);
         Assert.assertThat(webDriver.findElement(By.cssSelector("h1")).getText(), not(containsString("Where to?")));
+    }
+
+    @Test
+    public void testEnteringContraveningPasswordShowsErrorMessage() {
+        startCreateUserFlow(new RandomValueStringGenerator(260).generate());
+        Assert.assertEquals("Password must be no more than 255 characters in length.", webDriver.findElement(By.cssSelector(".alert-error")).getText());
+    }
+
+    private String startCreateUserFlow(String secret) {
+        String userEmail = "user" + new SecureRandom().nextInt() + "@example.com";
+
+        webDriver.get(baseUrl + "/");
+        webDriver.findElement(By.xpath("//*[text()='Create account']")).click();
+
+        Assert.assertEquals("Create your account", webDriver.findElement(By.tagName("h1")).getText());
+
+
+        webDriver.findElement(By.name("email")).sendKeys(userEmail);
+        webDriver.findElement(By.name("password")).sendKeys(secret);
+        webDriver.findElement(By.name("password_confirmation")).sendKeys(secret);
+
+        webDriver.findElement(By.xpath("//input[@value='Send activation link']")).click();
+        return userEmail;
     }
 }

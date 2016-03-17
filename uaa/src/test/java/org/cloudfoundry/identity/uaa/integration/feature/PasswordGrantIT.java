@@ -4,7 +4,9 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -49,6 +51,19 @@ public class PasswordGrantIT {
     @Autowired
     TestAccounts testAccounts;
 
+    @Before
+    @After
+    public void logout_and_clear_cookies() {
+        try {
+            webDriver.get(baseUrl + "/logout.do");
+        }catch (org.openqa.selenium.TimeoutException x) {
+            //try again - this should not be happening - 20 second timeouts
+            webDriver.get(baseUrl + "/logout.do");
+        }
+        webDriver.get(appUrl+"/j_spring_security_logout");
+        webDriver.manage().deleteAllCookies();
+    }
+
     @Test
     public void testUserLoginViaPasswordGrant() throws Exception {
         HttpHeaders headers = new HttpHeaders();
@@ -79,7 +94,7 @@ public class PasswordGrantIT {
         LinkedMultiValueMap<String, String> postBody = new LinkedMultiValueMap<>();
         postBody.add("grant_type", "password");
         postBody.add("username", userEmail);
-        postBody.add("password", "secret");
+        postBody.add("password", "secr3T");
 
         try {
             restOperations.exchange(baseUrl + "/oauth/token",
@@ -95,7 +110,7 @@ public class PasswordGrantIT {
     private String createUnverifiedUser() throws Exception {
         int randomInt = new SecureRandom().nextInt();
 
-        String adminAccessToken = testClient.getOAuthAccessToken("admin", "adminsecret", "client_credentials", "clients.read clients.write clients.secret");
+        String adminAccessToken = testClient.getOAuthAccessToken("admin", "adminsecret", "client_credentials", "clients.read clients.write clients.secret clients.admin");
 
         String scimClientId = "scim" + randomInt;
         testClient.createScimClient(adminAccessToken, scimClientId);
@@ -103,7 +118,7 @@ public class PasswordGrantIT {
         String scimAccessToken = testClient.getOAuthAccessToken(scimClientId, "scimsecret", "client_credentials", "scim.read scim.write password.write");
 
         String userEmail = "user" + randomInt + "@example.com";
-        testClient.createUser(scimAccessToken, userEmail, userEmail, "secret", false);
+        testClient.createUser(scimAccessToken, userEmail, userEmail, "secr3T", false);
 
         return userEmail;
     }

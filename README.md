@@ -4,8 +4,8 @@
 [![Build Status](https://travis-ci.org/cloudfoundry/uaa.svg?branch=develop)](https://travis-ci.org/cloudfoundry/uaa)
 [![Coverage Status](https://coveralls.io/repos/cloudfoundry/uaa/badge.png?branch=develop)](https://coveralls.io/r/cloudfoundry/uaa?branch=develop)
 
-The UAA is the identity management service for Cloud Foundry.  It's
-primary role is as an OAuth2 provider, issuing tokens for client
+The UAA is a multi tenant identity management service, used in Cloud Foundry, but also available
+as a stand alone OAuth2 server.  It's primary role is as an OAuth2 provider, issuing tokens for client
 applications to use when they act on behalf of Cloud Foundry users.
 It can also authenticate users with their Cloud Foundry credentials,
 and can act as an SSO service using those credentials (or others).  It
@@ -15,13 +15,16 @@ clients, as well as various other management functions.
 ## Co-ordinates
 
 * Tokens: [A note on tokens, scopes and authorities](https://github.com/cloudfoundry/uaa/tree/master/docs/UAA-Tokens.md)
-* Technical forum: [vcap-dev google group](https://groups.google.com/a/cloudfoundry.org/forum/?fromgroups#!forum/vcap-dev)
+* Technical forum: [cf-dev mailing list](https://lists.cloudfoundry.org)
 * Docs: [docs/](https://github.com/cloudfoundry/uaa/tree/master/docs)
 * API Documentation: [UAA-APIs.rst](https://github.com/cloudfoundry/uaa/tree/master/docs/UAA-APIs.rst)
 * Specification: [The Oauth 2 Authorization Framework](http://tools.ietf.org/html/rfc6749)
 * LDAP: [UAA LDAP Integration](https://github.com/cloudfoundry/uaa/tree/master/docs/UAA-LDAP.md)
 
 ## Quick Start
+
+Requirements:
+* Java 8
 
 If this works you are in business:
 
@@ -30,26 +33,36 @@ If this works you are in business:
     $ ./gradlew run
 
 The apps all work together with the apps running on the same port
-(8080) as `/uaa`, `/app` and `/api`.
+(8080) as [`/uaa`](http://localhost:8080/uaa), [`/app`](http://localhost:8080/app) and [`/api`](http://localhost:8080/api).
+
+UAA will log to a file called `uaa.log` which can be found using the following command:-
+
+    $ sudo find / -name uaa.log
+
+which you should find under something like:-
+
+    /private/var/folders/7v/518b18d97_3f4c8fzxphy6f8zcm51c/T/cargo/conf/logs/
 
 ### Deploy to Cloud Foundry
 
 You can also build the app and push it to Cloud Foundry, e.g.
+Our recommended way is to use a manifest file, but you can do everything on the command line.
 
     $ ./gradlew :cloudfoundry-identity-uaa:war
-    $ cf push myuaa --no-start -m 512M -b https://github.com/cloudfoundry/java-buildpack#v2.4 -p uaa/build/libs/cloudfoundry-identity-uaa-2.3.0.war 
-    $ cf set-env myuaa SPRING_PROFILES_ACTIVE default
+    $ cf push myuaa --no-start -m 512M -p uaa/build/libs/cloudfoundry-identity-uaa-2.3.2-SNAPSHOT.war 
+    $ cf set-env myuaa SPRING_PROFILES_ACTIVE default,hsqldb
     $ cf set-env myuaa UAA_URL http://myuaa.<domain>
     $ cf set-env myuaa LOGIN_URL http://myuaa.<domain>
-    $ cf set-env myuaa SPRING_PROFILES_ACTIVE default
+    $ cf set-env myuaa JBP_CONFIG_SPRING_AUTO_RECONFIGURATION '[enabled: false]'
+    $ cf set-env myuaa JBP_CONFIG_TOMCAT '{tomcat: { version: 7.0.+ }}'
     $ cf start myuaa
 
 In the steps above, replace:
   
 * `myuaa` with a unique application name
-* `1.8.0` with the appropriate version label from your build
+* `2.3.2-SNAPSHOT` with the appropriate version label from your build
 * `<domain>` this is your app domain. We will be parsing this from the system environment in the future
-* We have not tested our system on Apache Tomcat 8 and Java 8, so we pick a build pack that produces lower versions
+* You may also provide a configuration manifest where the environment variable UAA_CONFIG_YAML contains full configuration yaml.
 
 ### Demo of command line usage on local server
 
@@ -89,7 +102,7 @@ Then you can login as a resource server and retrieve the token
 details:
 
     $ uaac target http://localhost:8080/uaa
-    $ uaac token decode [token-value-from-above]
+    $ uaac token decode
     
 You should see your username and the client id of the original
 token grant on stdout, e.g.
@@ -183,7 +196,7 @@ server (see below for more detail on that).
 
 To modify the runtime parameters you can provide a `uaa.yml`, e.g.
 
-    $ cat > /tmp/uaa.yml
+    $ cat > /tmp/config/uaa.yml
     uaa:
       host: uaa.appcloud21.dev.mozycloud
       test:
@@ -193,50 +206,104 @@ To modify the runtime parameters you can provide a `uaa.yml`, e.g.
 
 then from `uaa/uaa`
 
-    $ CLOUD_FOUNDRY_CONFIG_PATH=/tmp ./gradlew test
+    $ CLOUD_FOUNDRY_CONFIG_PATH=/tmp/config ./gradlew test
     
-The webapp looks for a Yaml file in the following locations
+The webapp looks for Yaml content in the following locations
 (later entries override earlier ones) when it starts up.
 
     classpath:uaa.yml
     file:${CLOUD_FOUNDRY_CONFIG_PATH}/uaa.yml
     file:${UAA_CONFIG_FILE}
     ${UAA_CONFIG_URL}
+    System.getEnv('UAA_CONFIG_YAML') -> environment variable, if set must contain valid Yaml
+
+For example, to deploy the UAA as a Cloud Foundry application, you can provide an application manifest like
+
+    ---
+      applications:
+      - name: standalone-uaa-cf-war
+        memory: 512M
+        instances: 1
+        host: standalone-uaa
+        path: cloudfoundry-identity-uaa-3.0.0-SNAPSHOT.war
+        env:
+          JBP_CONFIG_SPRING_AUTO_RECONFIGURATION: '[enabled: false]'
+          JBP_CONFIG_TOMCAT: '{tomcat: { version: 7.0.+ }}'
+          SPRING_PROFILES_ACTIVE: hsqldb,default
+          UAA_CONFIG_YAML: |
+            uaa.url: http://standalone-uaa.cfapps.io
+            login.url: http://standalone-uaa.cfapps.io
+            smtp:
+              host: mail.server.host
+              port: 3535
+
+
+Or as an alternative, set the yaml configuration as a string for an environment variable using the set-env command
+
+    cf set-env sample-uaa-cf-war UAA_CONFIG_YAML '{ uaa.url: http://standalone-uaa.myapp.com, login.url: http://standalone-uaa.myapp.com, smtp: { host: mail.server.host, port: 3535 } }'
+    
+In addition, any simple type property that is read by the UAA can also be fully expanded and read as a system environment variable itself.
+Notice how uaa.url can be converted into an environment variable called UAA_URL
+
+    ---
+      applications:
+      - name: standalone-uaa-cf-war
+        memory: 512M
+        instances: 1
+        host: standalone-uaa
+        path: cloudfoundry-identity-uaa-3.0.0-SNAPSHOT.war
+        env:
+          JBP_CONFIG_SPRING_AUTO_RECONFIGURATION: '[enabled: false]'
+          JBP_CONFIG_TOMCAT: '{tomcat: { version: 7.0.+ }}'
+          SPRING_PROFILES_ACTIVE: hsqldb,default
+          UAA_URL: http://standalone-uaa.cfapps.io
+          LOGIN_URL: http://standalone-uaa.cfapps.io
+          UAA_CONFIG_YAML: |
+            smtp:
+              host: mail.server.host
+              port: 3535
 
 ### Using Gradle to test with postgresql or mysql
 
-The default uaa unit tests (./gradlew test) use hsqldb.
+The default uaa unit tests (./gradlew test integrationTest) use hsqldb.
 
 To run the unit tests using postgresql:
 
-    $ echo "spring_profiles: default,postgresql" > src/main/resources/uaa.yml 
     $ ./gradlew -Dspring.profiles.active=default,postgresql test integrationTest
+
+Optionally, the Spring profile can be configured in the `uaa.yml` file
+ 
+    $ echo "spring_profiles: default,postgresql" > src/main/resources/uaa.yml
 
 To run the unit tests using mysql:
 
-    $ echo "spring_profiles: default,mysql" > src/main/resources/uaa.yml 
     $ ./gradlew -Dspring.profiles.active=default,mysql test integrationTest
 
 
 The database configuration for the common and scim modules is defaulted in 
-the Spring XML configuration files. You can change them by configuring them in `uaa.yml`
+the [Spring XML configuration files](https://github.com/cloudfoundry/uaa/blob/master/common/src/main/resources/spring/env.xml). 
+You can change them by configuring them in `uaa.yml`
+
+The defaults are
+
+    PostgreSQL: User: root Password: changeme Database: uaa Host: localhost Port: 5432
+    MySQL:      User: root Password: changeme Database: uaa Host: localhost Port: 3306
 
 ## Inventory
 
-There are actually several projects here, the main `uaa` server application and some samples:
+There are actually several projects here, the main `uaa` server application, a client library and some samples:
 
-0. `common` is a module containing a JAR with all the business logic.  It is used in
-the webapps below.
+1. `uaa` a WAR project for easy deployment
 
-1. `uaa` is the actual UAA server
+2. `server` a JAR project containing the implementation of UAA's REST API (including [SCIM](http://www.simplecloud.info/)) and UI 
 
-2. `api` (sample) is an OAuth2 resource service which returns a mock list of deployed apps
+3. `model` a JAR project used by both the client library and server 
 
-3. `app` (sample) is a user application that uses both of the above
+4. `client-lib` a JAR project that provides a Java client API
 
-4. `scim` [SCIM](http://www.simplecloud.info/) user management module used by UAA
+5. `api` (sample) is an OAuth2 resource service which returns a mock list of deployed apps
 
-5. `login` This module represents the UI of the UAA. It is the code that was merged in from the former login-server project.
+6. `app` (sample) is a user application that uses both of the above
 
 In CloudFoundry terms
 
@@ -249,6 +316,11 @@ In CloudFoundry terms
 * `app` is a webapp that needs single sign on and access to the `api`
   service on behalf of users.
 
+### Organization of Code
+
+The projects are organized into horizontal layers; client, model, server, etc.  Within all of these projects the java packages are organized vertically around our internal services; zones, providers, clients, etc. 
+
+
 ## UAA Server
 
 The authentication service is `uaa`. It's a plain Spring MVC webapp.
@@ -259,27 +331,25 @@ tree. When running with gradle it listens on port 8080 and the URL is
 
 The UAA Server supports the APIs defined in the UAA-APIs document. To summarise:
 
-1. The OAuth2 /authorize and /token endpoints
+1. The OAuth2 /oauth/authorize and /oauth/token endpoints
 
 2. A /login_info endpoint to allow querying for required login prompts
 
 3. A /check_token endpoint, to allow resource servers to obtain information about
 an access token submitted by an OAuth2 client.
 
-4. SCIM user provisioning endpoint
+4. A /token_key endpoint, to allow resource servers to obtain the verification key to verify token signatures
 
-5. OpenID connect endpoints to support authentication /userinfo and
-/check_id (todo). Implemented roughly enough to get it working (so
-/app authenticates here), but not to meet the spec.
+5. SCIM user provisioning endpoint
+
+6. OpenID connect endpoints to support authentication /userinfo. Partial OpenID support.
 
 Authentication can be performed by command line clients by submitting
 credentials directly to the `/oauth/authorize` endpoint (as described in
 UAA-API doc).  There is an `ImplicitAccessTokenProvider` in Spring
 Security OAuth that can do the heavy lifting if your client is Java.
 
-By default `uaa` will launch with a context root `/uaa`. There is a
-Maven profile `local` to launch with context root `/`, and another
-called `vcap` to launch at `/` with a postgresql backend.
+By default `uaa` will launch with a context root `/uaa`. 
 
 ### Use Cases
 
@@ -303,14 +373,18 @@ called `vcap` to launch at `/` with a postgresql backend.
 
 ### Configuration
 
-There is a `uaa.yml` in the application which provides defaults to the
-placeholders in the Spring XML.  Wherever you see
-`${placeholder.name}` in the XML there is an opportunity to override
+There are two configuration files, `uaa.yml` and `login.yml`, in the application which provides defaults to the
+placeholders in the Spring XML.   
+Wherever you see `${placeholder.name}` in the XML there is an opportunity to override
 it either by providing a System property (`-D` to JVM) with the same
-name, or a custom `uaa.yml` (as described above).
+name, or a custom `uaa.yml` or `login.yml` (as described above).
+
+The `uaa.yml` and `login.yml` get merged during startup into one configuration.
 
 All passwords and client secrets in the config files are plain text,
 but they will be inserted into the UAA database encrypted with BCrypt.
+
+In the future, you will be able to provide passwords in bcrypt format to avoid having to specify clear text passwords.
 
 ### User Account Data
 
@@ -318,19 +392,16 @@ The default is to use an in-memory RDBMS user store that is
 pre-populated with a single test users: `marissa` has password
 `koala`.
 
-To use Postgresql for user data, activate one of the Spring profiles
-`hsqldb` or `postgresql`.
+To use Postgresql for user data, activate the Spring profile `postgresql`.
 
 The active profiles can be configured in `uaa.yml` using
 
     spring_profiles: postgresql,default
     
-To use PostgreSQL instead of HSQL:
+Or specify PostgreSQL on the command line:
 
-     $ echo "spring_profiles: default,postgresql" > src/main/resources/uaa.yml 
-     $ ./gradlew run
-
-
+     $ ./gradlew -Dspring.profiles.active=default,postgresql run
+     
 ## The API Sample Application
 
 Two sample applications are included with the UAA. The `/api` and `/app`
@@ -383,7 +454,7 @@ Here are some ways for you to get involved in the community:
 
 * Get involved with the Cloud Foundry community on the mailing lists.
   Please help out on the
-  [mailing list](https://groups.google.com/a/cloudfoundry.org/forum/?fromgroups#!forum/vcap-dev)
+  [mailing list](https://lists.cloudfoundry.org)
   by responding to questions and joining the debate.
 * Create [github](https://github.com/cloudfoundry/uaa/issues) tickets for bugs and new features and comment and
   vote on the ones that you are interested in.
@@ -393,6 +464,17 @@ Here are some ways for you to get involved in the community:
   want to contribute code this way, please reference an existing issue
   if there is one as well covering the specific issue you are
   addressing.  Always submit pull requests to the "develop" branch.
+  We strictly adhere to test driven development. We kindly ask that 
+  pull requests are accompanied with test cases that would be failing
+  if ran separately from the pull request.
 * Watch for upcoming articles on Cloud Foundry by
   [subscribing](http://blog.cloudfoundry.org) to the cloudfoundry.org
   blog
+
+## Acknowledgements
+
+* YourKit supports open source projects with its full-featured Java Profiler.
+  YourKit, LLC is the creator of <a href="https://www.yourkit.com/java/profiler/index.jsp">YourKit Java Profiler</a>
+  and <a href="https://www.yourkit.com/.net/profiler/index.jsp">YourKit .NET Profiler</a>,
+  innovative and intelligent tools for profiling Java and .NET applications.
+  [![](https://www.yourkit.com/images/yklogo.png)](https://www.yourkit.com/java/profiler/index.jsp)

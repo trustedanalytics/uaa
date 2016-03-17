@@ -1,6 +1,6 @@
 /*******************************************************************************
  *     Cloud Foundry
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -14,7 +14,7 @@ package org.cloudfoundry.identity.uaa.mock.token;
 
 import org.apache.commons.codec.binary.Base64;
 import org.cloudfoundry.identity.uaa.mock.InjectedMockContextTest;
-import org.cloudfoundry.identity.uaa.oauth.token.SignerProvider;
+import org.cloudfoundry.identity.uaa.oauth.SignerProvider;
 import org.cloudfoundry.identity.uaa.util.JsonUtils;
 import org.junit.After;
 import org.junit.Before;
@@ -23,6 +23,7 @@ import org.junit.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -91,16 +92,12 @@ public class TokenKeyEndpointMockMvcTests extends InjectedMockContextTest {
         originalSignKey = provider.getSigningKey();
         originalVerifierKey = provider.getVerifierKey();
         provider.setSigningKey(signKey);
-        provider.setVerifierKey(verifyKey);
-        provider.afterPropertiesSet();
     }
 
     @After
     public void resetKeys() throws Exception {
         SignerProvider provider = getWebApplicationContext().getBean(SignerProvider.class);
         provider.setSigningKey(originalSignKey);
-        provider.setVerifierKey(originalVerifierKey);
-        provider.afterPropertiesSet();
     }
 
     @Test
@@ -112,7 +109,6 @@ public class TokenKeyEndpointMockMvcTests extends InjectedMockContextTest {
             get("/token_key")
                 .accept(MediaType.APPLICATION_JSON)
                 .header("Authorization", basicDigestHeaderValue))
-            .andDo(print())
             .andExpect(status().isOk())
             .andReturn();
 
@@ -126,12 +122,41 @@ public class TokenKeyEndpointMockMvcTests extends InjectedMockContextTest {
         MvcResult result = getMockMvc().perform(
             get("/token_key")
                 .accept(MediaType.APPLICATION_JSON))
-            .andDo(print())
             .andExpect(status().isOk())
             .andReturn();
 
         Map<String, Object> key = JsonUtils.readValue(result.getResponse().getContentAsString(), Map.class);
         validateKey(key);
+    }
+
+    @Test
+    public void checkTokenKeysValues() throws Exception {
+        String basicDigestHeaderValue = "Basic "
+                + new String(Base64.encodeBase64(("app:appclientsecret").getBytes()));
+
+        MvcResult result = getMockMvc().perform(
+                get("/token_keys")
+                        .accept(MediaType.APPLICATION_JSON)
+                        .header("Authorization", basicDigestHeaderValue))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Map<String, Object> keys = JsonUtils.readValue(result.getResponse().getContentAsString(), Map.class);
+        validateKeys(keys);
+    }
+
+    @Test
+    public void checkTokenKeysValuesAnonymous() throws Exception {
+
+        MvcResult result = getMockMvc().perform(
+                get("/token_keys")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andDo(print())
+                .andReturn();
+
+        Map<String, Object> keys = JsonUtils.readValue(result.getResponse().getContentAsString(), Map.class);
+        validateKeys(keys);
     }
 
     public void validateKey(Map<String,Object> key) {
@@ -199,6 +224,13 @@ public class TokenKeyEndpointMockMvcTests extends InjectedMockContextTest {
         assertTrue(n instanceof String);
         //TODO - Validate the key?
 
+    }
+
+    public void validateKeys(Map<String, Object> response) {
+        List<Map<String, Object>> keys = (List<Map<String, Object>>)response.get("keys");
+        assertNotNull(keys);
+        assertEquals(1, keys.size());
+        validateKey(keys.get(0));
     }
 
 }

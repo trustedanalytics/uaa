@@ -1,6 +1,6 @@
 /*******************************************************************************
- *     Cloud Foundry 
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Cloud Foundry
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -11,19 +11,6 @@
  *     subcomponent's license, as noted in the LICENSE file.
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.integration;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 import org.cloudfoundry.identity.uaa.ServerRunning;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
@@ -46,6 +33,19 @@ import org.springframework.security.oauth2.client.test.OAuth2ContextSetup;
 import org.springframework.security.oauth2.common.util.RandomValueStringGenerator;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
 /**
  * @author Luke Taylor
  * @author Dave Syer
@@ -63,7 +63,7 @@ public class ScimUserEndpointsIntegrationTests {
 
     private final String usersEndpoint = "/Users";
 
-    private static final int NUM_DEFAULT_GROUPS_ON_STARTUP = 10;
+    private static final int NUM_DEFAULT_GROUPS_ON_STARTUP = 13;
 
     @Rule
     public ServerRunning serverRunning = ServerRunning.isRunning();
@@ -95,7 +95,6 @@ public class ScimUserEndpointsIntegrationTests {
             public void handleError(ClientHttpResponse response) throws IOException {
             }
         });
-
     }
 
     @SuppressWarnings("rawtypes")
@@ -140,6 +139,7 @@ public class ScimUserEndpointsIntegrationTests {
         ScimUser joe2 = client.getForObject(serverRunning.getUrl(userEndpoint + "/{id}"), ScimUser.class, joe1.getId());
 
         assertEquals(joe1.getId(), joe2.getId());
+        assertTrue(joe2.isVerified());
     }
 
     // curl -v -H "Content-Type: application/json" -H "Accept: application/json"
@@ -147,8 +147,8 @@ public class ScimUserEndpointsIntegrationTests {
     // "{\"userName\":\"joe\",\"schemas\":[\"urn:scim:schemas:core:1.0\"]}"
     // http://localhost:8080/uaa/User
     @Test
-    public void createUserSucceedsVerifiedIsFalse() throws Exception {
-        ResponseEntity<ScimUser> response = createUser(JOE, "Joe", "User", "joe@blah.com");
+    public void createUserSucceedsWithVerifiedIsFalse() throws Exception {
+        ResponseEntity<ScimUser> response = createUser(JOE, "Joe", "User", "joe@blah.com", false);
         ScimUser joe1 = response.getBody();
         assertEquals(JOE, joe1.getUserName());
 
@@ -157,23 +157,6 @@ public class ScimUserEndpointsIntegrationTests {
 
         assertEquals(joe1.getId(), joe2.getId());
         assertFalse(joe2.isVerified());
-    }
-
-    // curl -v -H "Content-Type: application/json" -H "Accept: application/json"
-    // --data
-    // "{\"userName\":\"joe\",\"schemas\":[\"urn:scim:schemas:core:1.0\"]}"
-    // http://localhost:8080/uaa/User
-    @Test
-    public void createUserSucceedsWithVerifiedIsTrue() throws Exception {
-        ResponseEntity<ScimUser> response = createUser(JOE, "Joe", "User", "joe@blah.com", true);
-        ScimUser joe1 = response.getBody();
-        assertEquals(JOE, joe1.getUserName());
-
-        // Check we can GET the user
-        ScimUser joe2 = client.getForObject(serverRunning.getUrl(userEndpoint + "/{id}"), ScimUser.class, joe1.getId());
-
-        assertEquals(joe1.getId(), joe2.getId());
-        assertTrue(joe2.isVerified());
     }
 
     // curl -v -H "Content-Type: application/json" -H "Accept: application/json"

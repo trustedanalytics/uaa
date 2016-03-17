@@ -10,6 +10,7 @@ import static org.junit.Assert.assertThat;
 import static org.springframework.http.HttpStatus.FOUND;
 import com.dumbster.smtp.SimpleSmtpServer;
 import com.dumbster.smtp.SmtpMessage;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -44,11 +45,24 @@ public class ChangeEmailIT {
     TestClient testClient;
 
     private String userEmail;
+
+    @Before
+    @After
+    public void logout_and_clear_cookies() {
+        try {
+            webDriver.get(baseUrl + "/logout.do");
+        }catch (org.openqa.selenium.TimeoutException x) {
+            //try again - this should not be happening - 20 second timeouts
+            webDriver.get(baseUrl + "/logout.do");
+        }
+        webDriver.manage().deleteAllCookies();
+    }
+
     @Before
     public void setUp() throws Exception {
         int randomInt = new SecureRandom().nextInt();
 
-        String adminAccessToken = testClient.getOAuthAccessToken("admin", "adminsecret", "client_credentials", "clients.read clients.write clients.secret");
+        String adminAccessToken = testClient.getOAuthAccessToken("admin", "adminsecret", "client_credentials", "clients.read clients.write clients.secret clients.admin");
 
         String scimClientId = "scim" + randomInt;
         testClient.createScimClient(adminAccessToken, scimClientId);
@@ -56,7 +70,7 @@ public class ChangeEmailIT {
         String scimAccessToken = testClient.getOAuthAccessToken(scimClientId, "scimsecret", "client_credentials", "scim.read scim.write password.write");
 
         userEmail = "user" + randomInt + "@example.com";
-        testClient.createUser(scimAccessToken, userEmail, userEmail, "secret", true);
+        testClient.createUser(scimAccessToken, userEmail, userEmail, "secr3T", true);
     }
 
     @Test
@@ -70,7 +84,7 @@ public class ChangeEmailIT {
     }
 
     public void testChangeEmail(boolean logout) throws Exception {
-        signIn(userEmail, "secret");
+        signIn(userEmail, "secr3T");
         int receivedEmailSize = simpleSmtpServer.getReceivedEmailSize();
 
         webDriver.get(baseUrl + "/profile");
@@ -107,7 +121,7 @@ public class ChangeEmailIT {
 
     @Test
     public void testChangeEmailWithClientRedirect() throws Exception{
-        signIn(userEmail, "secret");
+        signIn(userEmail, "secr3T");
 
         webDriver.get(baseUrl + "/change_email?client_id=app");
 

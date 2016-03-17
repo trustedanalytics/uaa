@@ -1,6 +1,6 @@
 /*******************************************************************************
  *     Cloud Foundry
- *     Copyright (c) [2009-2014] Pivotal Software, Inc. All Rights Reserved.
+ *     Copyright (c) [2009-2016] Pivotal Software, Inc. All Rights Reserved.
  *
  *     This product is licensed to you under the Apache License, Version 2.0 (the "License").
  *     You may not use this product except in compliance with the License.
@@ -12,6 +12,7 @@
  *******************************************************************************/
 package org.cloudfoundry.identity.uaa.mock.audit;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.commons.codec.binary.Base64;
 import org.cloudfoundry.identity.uaa.audit.AuditEvent;
 import org.cloudfoundry.identity.uaa.audit.AuditEventType;
@@ -19,9 +20,9 @@ import org.cloudfoundry.identity.uaa.audit.JdbcAuditService;
 import org.cloudfoundry.identity.uaa.audit.UaaAuditService;
 import org.cloudfoundry.identity.uaa.audit.event.AbstractUaaEvent;
 import org.cloudfoundry.identity.uaa.audit.event.ApprovalModifiedEvent;
-import org.cloudfoundry.identity.uaa.audit.event.GroupModifiedEvent;
+import org.cloudfoundry.identity.uaa.scim.event.GroupModifiedEvent;
 import org.cloudfoundry.identity.uaa.audit.event.TokenIssuedEvent;
-import org.cloudfoundry.identity.uaa.audit.event.UserModifiedEvent;
+import org.cloudfoundry.identity.uaa.scim.event.UserModifiedEvent;
 import org.cloudfoundry.identity.uaa.authentication.UaaAuthenticationDetails;
 import org.cloudfoundry.identity.uaa.authentication.event.ClientAuthenticationFailureEvent;
 import org.cloudfoundry.identity.uaa.authentication.event.ClientAuthenticationSuccessEvent;
@@ -32,19 +33,21 @@ import org.cloudfoundry.identity.uaa.authentication.event.UserAuthenticationSucc
 import org.cloudfoundry.identity.uaa.authentication.event.UserNotFoundEvent;
 import org.cloudfoundry.identity.uaa.authentication.manager.AuthzAuthenticationManager;
 import org.cloudfoundry.identity.uaa.mock.InjectedMockContextTest;
-import org.cloudfoundry.identity.uaa.oauth.approval.Approval;
-import org.cloudfoundry.identity.uaa.password.event.PasswordChangeEvent;
-import org.cloudfoundry.identity.uaa.password.event.PasswordChangeFailureEvent;
-import org.cloudfoundry.identity.uaa.password.event.ResetPasswordRequestEvent;
+import org.cloudfoundry.identity.uaa.mock.util.MockMvcUtils;
+import org.cloudfoundry.identity.uaa.approval.Approval;
+import org.cloudfoundry.identity.uaa.account.event.PasswordChangeEvent;
+import org.cloudfoundry.identity.uaa.account.event.PasswordChangeFailureEvent;
+import org.cloudfoundry.identity.uaa.account.event.ResetPasswordRequestEvent;
 import org.cloudfoundry.identity.uaa.scim.ScimGroup;
 import org.cloudfoundry.identity.uaa.scim.ScimGroupMember;
 import org.cloudfoundry.identity.uaa.scim.ScimUser;
-import org.cloudfoundry.identity.uaa.scim.endpoints.PasswordResetEndpoints;
+import org.cloudfoundry.identity.uaa.account.LostPasswordChangeRequest;
 import org.cloudfoundry.identity.uaa.scim.event.ScimEventPublisher;
 import org.cloudfoundry.identity.uaa.test.TestApplicationEventListener;
 import org.cloudfoundry.identity.uaa.test.TestClient;
 import org.cloudfoundry.identity.uaa.test.UaaTestAccounts;
 import org.cloudfoundry.identity.uaa.util.JsonUtils;
+import org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder;
 import org.cloudfoundry.identity.uaa.zone.MultitenantJdbcClientDetailsService;
 import org.junit.After;
 import org.junit.Before;
@@ -53,11 +56,13 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.common.util.RandomValueStringGenerator;
 import org.springframework.security.oauth2.provider.ClientDetails;
 import org.springframework.security.oauth2.provider.ClientRegistrationService;
 import org.springframework.security.oauth2.provider.client.BaseClientDetails;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -65,10 +70,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static org.cloudfoundry.identity.uaa.mock.util.MockMvcUtils.CookieCsrfPostProcessor.cookieCsrf;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -83,14 +90,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 public class AuditCheckMockMvcTests extends InjectedMockContextTest {
 
     private ClientRegistrationService clientRegistrationService;
-    private ApplicationListener<AbstractUaaEvent> listener;
     private TestClient testClient;
     private UaaTestAccounts testAccounts;
+    private ApplicationListener<UserAuthenticationSuccessEvent> authSuccessListener2;
+    private ApplicationListener<AbstractUaaEvent> listener2;
     private TestApplicationEventListener<AbstractUaaEvent> testListener;
     private ApplicationListener<UserAuthenticationSuccessEvent> authSuccessListener;
+    private ApplicationListener<AbstractUaaEvent> listener;
     private ScimUser testUser;
-    private String testPassword = "secret";
+    private String testPassword = "secr3T";
     ClientDetails originalLoginClient;
+    private AuthzAuthenticationManager mgr;
+
     @Before
     public void setUp() throws Exception {
         clientRegistrationService = getWebApplicationContext().getBean(ClientRegistrationService.class);
@@ -99,7 +110,8 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
         testAccounts = UaaTestAccounts.standard(null);
 
         testListener = TestApplicationEventListener.forEventClass(AbstractUaaEvent.class);
-        listener = mock(new DefaultApplicationListener<AbstractUaaEvent>() {}.getClass());
+        listener = mock(new DefaultApplicationListener<AbstractUaaEvent>() {
+        }.getClass());
         authSuccessListener = mock(new DefaultApplicationListener<UserAuthenticationSuccessEvent>() {
         }.getClass());
         getWebApplicationContext().addApplicationListener(listener);
@@ -110,24 +122,35 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             testAccounts.getAdminClientId(),
             testAccounts.getAdminClientSecret(),
             "uaa.admin,scim.write");
-        testUser = createUser(adminToken, "testUser", "Test", "User", "testuser@test.com", testPassword);
+        testUser = createUser(adminToken, "testUser", "Test", "User", "testuser@test.com", testPassword, true);
 
         testListener.clearEvents();
+        listener2 = listener;
         listener = mock(new DefaultApplicationListener<AbstractUaaEvent>() {}.getClass());
+        authSuccessListener2 = authSuccessListener;
         authSuccessListener = mock(new DefaultApplicationListener<UserAuthenticationSuccessEvent>() {}.getClass());
         getWebApplicationContext().addApplicationListener(listener);
         getWebApplicationContext().addApplicationListener(authSuccessListener);
+
+        this.mgr = getWebApplicationContext().getBean("uaaUserDatabaseAuthenticationManager", AuthzAuthenticationManager.class);
+        this.mgr.setAllowUnverifiedUsers(false);
     }
 
     @After
     public void resetLoginClient() {
         clientRegistrationService.updateClientDetails(originalLoginClient);
+        MockMvcUtils.utils().removeEventListener(getWebApplicationContext(), testListener);
+        MockMvcUtils.utils().removeEventListener(getWebApplicationContext(), listener);
+        MockMvcUtils.utils().removeEventListener(getWebApplicationContext(), authSuccessListener);
+        MockMvcUtils.utils().removeEventListener(getWebApplicationContext(), listener2);
+        MockMvcUtils.utils().removeEventListener(getWebApplicationContext(), authSuccessListener2);
     }
 
 
     @Test
     public void userLoginTest() throws Exception {
         MockHttpServletRequestBuilder loginPost = post("/login.do")
+            .with(cookieCsrf())
             .accept(MediaType.TEXT_HTML_VALUE)
             .param("username", testUser.getUserName())
             .param("password", testPassword);
@@ -165,6 +188,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
     @Test
     public void invalidPasswordLoginFailedTest() throws Exception {
         MockHttpServletRequestBuilder loginPost = post("/login.do")
+            .with(cookieCsrf())
             .accept(MediaType.TEXT_HTML_VALUE)
             .param("username", testUser.getUserName())
             .param("password", "");
@@ -183,18 +207,22 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
     }
 
     @Test
-    public void unverifiedUserAuthenticationWhenAllowedTest() throws Exception {
+    public void unverifiedLegacyUserAuthenticationWhenAllowedTest() throws Exception {
+        mgr.setAllowUnverifiedUsers(true);
+
         String adminToken = testClient.getClientCredentialsOAuthAccessToken(
                 testAccounts.getAdminClientId(),
                 testAccounts.getAdminClientSecret(),
                 "uaa.admin,scim.write");
 
-        ScimUser molly = createUser(adminToken, "molly", "Molly", "Collywobble", "molly@example.com", "wobble");
+        ScimUser molly = createUser(adminToken, "molly", "Molly", "Collywobble", "molly@example.com", "wobblE3", false);
+
+        getWebApplicationContext().getBeansOfType(JdbcTemplate.class).values().stream().forEach(jdbc -> jdbc.execute("update users set legacy_verification_behavior = true where origin='uaa' and username = '" + molly.getUserName() + "'"));
 
         MockHttpServletRequestBuilder loginPost = post("/authenticate")
                 .accept(MediaType.APPLICATION_JSON_VALUE)
                 .param("username", molly.getUserName())
-                .param("password", "wobble");
+                .param("password", "wobblE3");
         getMockMvc().perform(loginPost)
                 .andExpect(status().isOk());
 
@@ -205,23 +233,44 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
     }
 
     @Test
-    public void unverifiedUserAuthenticationWhenNotAllowedTest() throws Exception {
-        try {
-            for (Map.Entry<String,AuthzAuthenticationManager > mgr : getWebApplicationContext().getBeansOfType(AuthzAuthenticationManager.class).entrySet()) {
-                mgr.getValue().setAllowUnverifiedUsers(false);
-            }
+    public void unverifiedPostLegacyUserAuthenticationWhenAllowedTest() throws Exception {
+        mgr.setAllowUnverifiedUsers(true);
 
+        String adminToken = testClient.getClientCredentialsOAuthAccessToken(
+                testAccounts.getAdminClientId(),
+                testAccounts.getAdminClientSecret(),
+                "uaa.admin,scim.write");
+
+        ScimUser molly = createUser(adminToken, "molly", "Molly", "Collywobble", "molly@example.com", "wobblE3", false);
+
+        MockHttpServletRequestBuilder loginPost = post("/authenticate")
+                .accept(MediaType.APPLICATION_JSON_VALUE)
+                .param("username", molly.getUserName())
+                .param("password", "wobblE3");
+        getMockMvc().perform(loginPost)
+                .andExpect(status().isForbidden());
+
+        ArgumentCaptor<AbstractUaaEvent> captor = ArgumentCaptor.forClass(AbstractUaaEvent.class);
+        verify(listener, atLeast(1)).onApplicationEvent(captor.capture());
+
+        List<AbstractUaaEvent> allValues = captor.getAllValues();
+        UnverifiedUserAuthenticationEvent event = (UnverifiedUserAuthenticationEvent) allValues.get(allValues.size() - 1);
+        assertEquals(molly.getUserName(), event.getUser().getUsername());
+    }
+
+    @Test
+    public void unverifiedUserAuthenticationWhenNotAllowedTest() throws Exception {
             String adminToken = testClient.getClientCredentialsOAuthAccessToken(
                 testAccounts.getAdminClientId(),
                 testAccounts.getAdminClientSecret(),
                 "uaa.admin,scim.write");
 
-            ScimUser molly = createUser(adminToken, "molly", "Molly", "Collywobble", "molly@example.com", "wobble");
+            ScimUser molly = createUser(adminToken, "molly", "Molly", "Collywobble", "molly@example.com", "wobblE3", false);
 
             MockHttpServletRequestBuilder loginPost = post("/authenticate")
                 .accept(MediaType.APPLICATION_JSON_VALUE)
                 .param("username", molly.getUserName())
-                .param("password", "wobble");
+                .param("password", "wobblE3");
             getMockMvc().perform(loginPost)
                 .andExpect(status().isForbidden());
 
@@ -231,11 +280,6 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             List<AbstractUaaEvent> allValues = captor.getAllValues();
             UnverifiedUserAuthenticationEvent event = (UnverifiedUserAuthenticationEvent) allValues.get(allValues.size() - 1);
             assertEquals(molly.getUserName(), event.getUser().getUsername());
-        } finally {
-            for (Map.Entry<String,AuthzAuthenticationManager > mgr : getWebApplicationContext().getBeansOfType(AuthzAuthenticationManager.class).entrySet()) {
-                mgr.getValue().setAllowUnverifiedUsers(true);
-            }
-        }
     }
 
     @Test
@@ -264,7 +308,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             testAccounts.getAdminClientSecret(),
             "uaa.admin,scim.write");
 
-        ScimUser jacob = createUser(adminToken, "jacob", "Jacob", "Gyllenhammer", "jacob@gyllenhammer.non", null);
+        ScimUser jacob = createUser(adminToken, "jacob", "Jacob", "Gyllenhammer", "jacob@gyllenhammer.non", null, true);
         String jacobId = jacob.getId();
 
         MockHttpServletRequestBuilder loginPost = post("/authenticate")
@@ -289,6 +333,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
         String username = "test1234";
 
         MockHttpServletRequestBuilder loginPost = post("/login.do")
+            .with(cookieCsrf())
             .accept(MediaType.TEXT_HTML_VALUE)
             .param("username", username)
             .param("password", testPassword);
@@ -308,6 +353,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
     @Test
     public void userChangePasswordTest() throws Exception {
         MockHttpServletRequestBuilder loginPost = post("/login.do")
+            .with(cookieCsrf())
             .accept(MediaType.APPLICATION_JSON_VALUE)
             .param("username", testUser.getUserName())
             .param("password", testPassword);
@@ -330,7 +376,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             .contentType(MediaType.APPLICATION_JSON)
             .header("Authorization", "Bearer " + marissaToken)
             .content("{\n" +
-                    "  \"password\": \"koala2\",\n" +
+                    "  \"password\": \"Koala2\",\n" +
                     "  \"oldPassword\": \"" + testPassword + "\"\n" +
                     "}");
 
@@ -348,6 +394,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
     @Test
     public void userChangeInvalidPasswordTest() throws Exception {
         MockHttpServletRequestBuilder loginPost = post("/login.do")
+            .with(cookieCsrf())
             .accept(MediaType.APPLICATION_JSON_VALUE)
             .param("username", testUser.getUserName())
             .param("password", testPassword);
@@ -372,7 +419,7 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             .contentType(MediaType.APPLICATION_JSON)
             .header("Authorization", "Bearer " + marissaToken)
             .content("{\n" +
-                    "  \"password\": \"koala2\",\n" +
+                    "  \"password\": \"Koala2\",\n" +
                     "  \"oldPassword\": \"invalid\"\n" +
                     "}");
 
@@ -388,14 +435,25 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
         assertEquals("Old password is incorrect", pwfe.getMessage());
     }
 
-    @Test
-    public void loginServerPasswordChange() throws Exception {
-        String loginToken = testClient.getClientCredentialsOAuthAccessToken("login", "loginsecret", "oauth.login");
+    private String requestExpiringCode(String email, String token) throws Exception {
+        MockHttpServletRequestBuilder resetPasswordPost = post("/password_resets")
+            .accept(MediaType.APPLICATION_JSON_VALUE)
+            .contentType(MediaType.APPLICATION_JSON)
+            .header("Authorization", "Bearer " + token)
+            .content(email);
+        MvcResult mvcResult = getMockMvc().perform(resetPasswordPost)
+            .andExpect(status().isCreated()).andReturn();
 
-        PasswordResetEndpoints.PasswordChange pwch = new PasswordResetEndpoints.PasswordChange();
-        pwch.setUsername(testUser.getUserName());
-        pwch.setCurrentPassword(testPassword);
-        pwch.setNewPassword("koala2");
+        return ((Map<String, String>) JsonUtils.readValue(mvcResult.getResponse().getContentAsString(),
+            new TypeReference<Map<String, String>>() {})).get("code");
+    }
+
+    @Test
+    public void changePassword_ReturnsSuccess_WithValidExpiringCode() throws Exception {
+        String loginToken = testClient.getClientCredentialsOAuthAccessToken("login", "loginsecret", "oauth.login");
+        String expiringCode = requestExpiringCode(testUser.getUserName(), loginToken);
+
+        LostPasswordChangeRequest pwch = new LostPasswordChangeRequest(expiringCode, "Koala2");
 
         MockHttpServletRequestBuilder changePasswordPost = post("/password_change")
             .accept(MediaType.APPLICATION_JSON_VALUE)
@@ -407,48 +465,10 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
                 .andExpect(status().isOk());
 
         ArgumentCaptor<AbstractUaaEvent> captor  = ArgumentCaptor.forClass(AbstractUaaEvent.class);
-        verify(listener, times(3)).onApplicationEvent(captor.capture());
+        verify(listener, atLeastOnce()).onApplicationEvent(captor.capture());
         PasswordChangeEvent pce = (PasswordChangeEvent)captor.getValue();
         assertEquals(testUser.getUserName(), pce.getUser().getUsername());
         assertEquals("Password changed", pce.getMessage());
-
-        pwch = new PasswordResetEndpoints.PasswordChange();
-        pwch.setUsername(testUser.getUserName());
-        pwch.setNewPassword(testPassword);
-        pwch.setCurrentPassword("koala2");
-        changePasswordPost = post("/password_change")
-            .accept(MediaType.APPLICATION_JSON_VALUE)
-            .contentType(MediaType.APPLICATION_JSON)
-            .header("Authorization", "Bearer " + loginToken)
-            .content(JsonUtils.writeValueAsBytes(pwch));
-
-        getMockMvc().perform(changePasswordPost)
-            .andExpect(status().isOk());
-    }
-
-    @Test
-    public void loginServerInvalidPasswordChange() throws Exception {
-        String loginToken = testClient.getClientCredentialsOAuthAccessToken("login", "loginsecret", "oauth.login");
-
-        PasswordResetEndpoints.PasswordChange pwch = new PasswordResetEndpoints.PasswordChange();
-        pwch.setUsername(testUser.getUserName());
-        pwch.setCurrentPassword("dsadasda");
-        pwch.setNewPassword("koala2");
-
-        MockHttpServletRequestBuilder changePasswordPost = post("/password_change")
-            .accept(MediaType.APPLICATION_JSON_VALUE)
-            .contentType(MediaType.APPLICATION_JSON)
-            .header("Authorization", "Bearer " + loginToken)
-            .content(JsonUtils.writeValueAsBytes(pwch));
-
-        getMockMvc().perform(changePasswordPost)
-            .andExpect(status().isUnauthorized());
-
-        ArgumentCaptor<AbstractUaaEvent> captor = ArgumentCaptor.forClass(AbstractUaaEvent.class);
-        verify(listener, times(3)).onApplicationEvent(captor.capture());
-        PasswordChangeFailureEvent pce = (PasswordChangeFailureEvent) captor.getValue();
-        assertEquals(testUser.getUserName(), pce.getUser().getUsername());
-        assertEquals("Old password is incorrect", pce.getMessage());
     }
 
     @Test
@@ -493,12 +513,18 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
         ClientAuthenticationFailureEvent event1 = (ClientAuthenticationFailureEvent)captor.getAllValues().get(1);
         assertEquals("login", event1.getClientId());
     }
+
     @Test
     public void testUserApprovalAdded() throws Exception {
         clientRegistrationService.updateClientDetails(new BaseClientDetails("login", "oauth", "oauth.approvals", "password", "oauth.login"));
 
         String marissaToken = testClient.getUserOAuthAccessToken("login", "loginsecret", testUser.getUserName(), testPassword, "oauth.approvals");
-        Approval[] approvals = {new Approval(null, "app", "cloud_controller.read", 1000, Approval.ApprovalStatus.APPROVED)};
+        Approval[] approvals = {new Approval()
+            .setUserId(null)
+            .setClientId("app")
+            .setScope("cloud_controller.read")
+            .setExpiresAt(Approval.timeFromNow(1000))
+            .setStatus(Approval.ApprovalStatus.APPROVED)};
 
         MockHttpServletRequestBuilder approvalsPut = put("/approvals")
                 .accept(MediaType.APPLICATION_JSON_VALUE)
@@ -716,12 +742,12 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
             testAccounts.getAdminClientSecret(),
             "uaa.admin,scim.write");
 
-        ScimUser jacob = createUser(adminToken, "jacob", "Jacob", "Gyllenhammer", "jacob@gyllenhammer.non", null);
-        ScimUser emily = createUser(adminToken, "emily", "Emily", "Gyllenhammer", "emily@gyllenhammer.non", null);
-        ScimUser jonas = createUser(adminToken, "jonas", "Jonas", "Gyllenhammer", "jonas@gyllenhammer.non", null);
+        ScimUser jacob = createUser(adminToken, "jacob", "Jacob", "Gyllenhammer", "jacob@gyllenhammer.non", null, true);
+        ScimUser emily = createUser(adminToken, "emily", "Emily", "Gyllenhammer", "emily@gyllenhammer.non", null, true);
+        ScimUser jonas = createUser(adminToken, "jonas", "Jonas", "Gyllenhammer", "jonas@gyllenhammer.non", null, true);
 
 
-        ScimGroup group = new ScimGroup("testgroup");
+        ScimGroup group = new ScimGroup(null,"testgroup",IdentityZoneHolder.get().getId());
         ScimGroupMember mjacob = new ScimGroupMember(
             jacob.getId(),
             ScimGroupMember.Type.USER,
@@ -805,13 +831,14 @@ public class AuditCheckMockMvcTests extends InjectedMockContextTest {
 
     }
 
-    private ScimUser createUser(String adminToken, String username, String firstname, String lastname, String email, String password) throws Exception {
+    private ScimUser createUser(String adminToken, String username, String firstname, String lastname, String email, String password, boolean verified) throws Exception {
         ScimUser user = new ScimUser();
         username+=new RandomValueStringGenerator().generate();
         user.setUserName(username);
         user.setName(new ScimUser.Name(firstname, lastname));
         user.addEmail(email);
         user.setPassword(password);
+        user.setVerified(verified);
 
         MockHttpServletRequestBuilder userPost = post("/Users")
             .accept(MediaType.APPLICATION_JSON_VALUE)
