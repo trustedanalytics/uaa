@@ -28,22 +28,13 @@
 <body>
 <div class="content">
     <div class="header">
-        <div layout:fragment="page-nav"></div>
         <div class="header-image"></div>
     </div>
 
     <div layout:fragment="page-content"></div>
     <div class="footer-spacer"></div>
 </div>
-<div class="footer">
-    <div class="copyright"
-         th:with="links=${@environment.getProperty('login.branding.footerLinks', Class.forName('java.util.Map'))}"
-         th:inline="text"
-         th:title="|Version: ${@buildInfo.version}, Commit: ${@buildInfo.commitId}, Timestamp: ${@buildInfo.timestamp}, UAA: ${@buildInfo.uaaUrl}|">
-         [[${copyright}]]
-         <th:block th:each="link,iter : ${links}"><th:block th:if="${!iter.first}"> &mdash;</th:block> <a href="/" th:href="${link.value}">[[${link.key}]]</a></th:block>
-    </div>
-</div>
+<div class="footer-cookies">Cookies are necessary for proper behaviour of this site. If you don't want to use them, you can disable cookies in browser preferences.</div>
 
 <th:block th:with="code=${@environment.getProperty('analytics.code')},domain=${@environment.getProperty('analytics.domain')}">
     <th:block th:if="${code} and ${domain}">
