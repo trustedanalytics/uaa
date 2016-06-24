@@ -230,3 +230,4 @@ LOGIN_SECRET: loginsecret
 #  port: 2525
 #  user:
 #  password:
+#  protocol: 
